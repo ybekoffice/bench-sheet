@@ -1,0 +1,22 @@
+# 가상환경
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# 비밀키 / 인증
+config/.env
+config/*.json
+
+# 데이터 (로컬 전용)
+data/posts.db
+data/jobs.json
+data/videos/
+data/transcripts/
+data/insta_posts_*.xlsx
+
+# 로그
+logs/
+
+# macOS
+.DS_Store
