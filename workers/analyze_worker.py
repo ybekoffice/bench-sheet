@@ -149,7 +149,11 @@ def _gemini_analyze(mp4_path: Path) -> dict | None:
             text = text.split("```")[1]
             if text.startswith("json"):
                 text = text[4:]
-        return json.loads(text)
+        data = json.loads(text)
+        for key, val in data.items():
+            if isinstance(val, list):
+                data[key] = ", ".join(str(v) for v in val)
+        return data
 
     except Exception as e:
         print(f"    Gemini 실패: {e}")

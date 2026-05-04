@@ -23,9 +23,9 @@ def export(out_path: Path, since: str | None = None):
     # since 가 없으면 72시간 이내 전체, 있으면 해당 수집 시점 이후 스냅샷이 기록된 게시물만
     if since:
         time_filter_posts    = "INNER JOIN post_snapshots ps ON p.media_id = ps.media_id"
-        time_where_posts     = "AND ps.collected_at >= :since"
+        time_where_posts     = "AND ps.collected_at >= :since AND p.media_timestamp >= datetime('now', '-72 hours')"
         time_filter_summary  = "INNER JOIN post_snapshots ps ON p.media_id = ps.media_id"
-        time_where_summary   = "AND ps.collected_at >= :since"
+        time_where_summary   = "AND ps.collected_at >= :since AND p.media_timestamp >= datetime('now', '-72 hours')"
         params = {"since": since}
     else:
         time_filter_posts    = ""
@@ -133,5 +133,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     now_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
-    out_path = args.out or OUT_DIR / f"insta_posts_{now_str}.xlsx"
+    out_path = args.out or OUT_DIR / f"벤치시트_{now_str}.xlsx"
     export(out_path, since=args.since)

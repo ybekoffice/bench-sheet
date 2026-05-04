@@ -66,7 +66,7 @@ def refresh_jobs() -> list[dict]:
             continue  # 아직 실행 중
         # 프로세스가 종료됨 — 엑셀 파일 생성 여부로 성공/실패 판정
         started_ts = datetime.fromisoformat(job["started_at"]).timestamp()
-        excel_files = sorted(DATA_DIR.glob("insta_posts_*.xlsx"), key=lambda p: p.stat().st_mtime)
+        excel_files = sorted(DATA_DIR.glob("벤치시트_*.xlsx"), key=lambda p: p.stat().st_mtime)
         new_excel = next((p for p in excel_files if p.stat().st_mtime > started_ts), None)
         if new_excel:
             job["status"] = "done"

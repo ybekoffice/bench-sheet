@@ -88,7 +88,7 @@ else:
                     st.code(log_tail, language=None)
 
 # ── 시간대별 평균 소요시간 ──────────────────────────────────────────────────
-done_jobs = [j for j in jobs if j["status"] == "done" and _duration_min(j) is not None]
+done_jobs = [j for j in jobs if j["status"] == "done" and (_duration_min(j) or 0) >= 3]
 
 if len(done_jobs) >= 2:
     st.divider()

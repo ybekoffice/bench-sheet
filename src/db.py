@@ -1,8 +1,10 @@
 """SQLite 스키마 + 공통 쿼리."""
+import os
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "data" / "posts.db"
+_default_db = Path(__file__).parent.parent / "data" / "posts.db"
+DB_PATH = Path(os.environ["POSTS_DB"]) if "POSTS_DB" in os.environ else _default_db
 
 
 def get_conn() -> sqlite3.Connection:
@@ -43,6 +45,17 @@ def _migrate(conn: sqlite3.Connection):
     existing_accounts = {r[1] for r in conn.execute("PRAGMA table_info(accounts)").fetchall()}
     if existing_accounts and "category" not in existing_accounts:
         conn.execute("ALTER TABLE accounts ADD COLUMN category TEXT")
+    if existing_accounts and "follower_count" not in existing_accounts:
+        conn.execute("ALTER TABLE accounts ADD COLUMN follower_count INTEGER DEFAULT 0")
+    if existing_accounts and "follower_updated_at" not in existing_accounts:
+        conn.execute("ALTER TABLE accounts ADD COLUMN follower_updated_at TEXT")
+    # posts 테이블의 기존 팔로워 수를 accounts로 복사 (컬럼 신규 추가 직후 1회)
+    conn.execute("""
+        UPDATE accounts SET follower_count = (
+            SELECT MAX(follower_count) FROM posts WHERE posts.account_name = accounts.account_name
+        )
+        WHERE follower_count IS NULL OR follower_count = 0
+    """)
 
     conn.commit()
 
@@ -132,6 +145,28 @@ def init_db():
                 embedding  BLOB NOT NULL,
                 created_at TEXT NOT NULL
             );
+
+            -- 제품 텍스트 유사 쌍 (Gemini product_text 기반)
+            CREATE TABLE IF NOT EXISTS text_similar_pairs (
+                media_a     TEXT NOT NULL,
+                media_b     TEXT NOT NULL,
+                text_sim    REAL NOT NULL,
+                detected_at TEXT NOT NULL,
+                PRIMARY KEY (media_a, media_b)
+            );
+            CREATE INDEX IF NOT EXISTS idx_tpairs_a ON text_similar_pairs(media_a);
+            CREATE INDEX IF NOT EXISTS idx_tpairs_b ON text_similar_pairs(media_b);
+
+            -- 시각 유사 쌍 (CLIP 임베딩 기반)
+            CREATE TABLE IF NOT EXISTS visual_similar_pairs (
+                media_a     TEXT NOT NULL,
+                media_b     TEXT NOT NULL,
+                clip_sim    REAL NOT NULL,
+                detected_at TEXT NOT NULL,
+                PRIMARY KEY (media_a, media_b)
+            );
+            CREATE INDEX IF NOT EXISTS idx_vpairs_a ON visual_similar_pairs(media_a);
+            CREATE INDEX IF NOT EXISTS idx_vpairs_b ON visual_similar_pairs(media_b);
 
             -- 수집 때마다 좋아요·댓글 스냅샷 (변화율 계산용)
             CREATE TABLE IF NOT EXISTS post_snapshots (
@@ -284,8 +319,22 @@ def get_all_account_names(conn: sqlite3.Connection) -> list[str]:
     return [r[0] for r in rows]
 
 
+def get_accounts_needing_followers(conn: sqlite3.Connection) -> list[str]:
+    """팔로워 수가 0이거나 없는 accounts 테이블 계정 전체 반환."""
+    rows = conn.execute("""
+        SELECT account_name FROM accounts
+        WHERE follower_count IS NULL OR follower_count = 0
+        ORDER BY account_name
+    """).fetchall()
+    return [r[0] for r in rows]
+
+
 def update_follower_counts(conn: sqlite3.Connection, counts: dict[str, int], now: str):
-    """계정별 팔로워 수를 해당 계정의 모든 게시물에 일괄 업데이트."""
+    """계정별 팔로워 수를 accounts 테이블과 posts 테이블에 일괄 업데이트."""
+    conn.executemany("""
+        UPDATE accounts SET follower_count = ?, follower_updated_at = ?
+        WHERE account_name = ?
+    """, [(count, now, account) for account, count in counts.items()])
     conn.executemany("""
         UPDATE posts SET follower_count = ?, last_metric_update_at = ?
         WHERE account_name = ?
@@ -473,6 +522,53 @@ def get_all_product_text_embeddings(conn: sqlite3.Connection) -> list[sqlite3.Ro
     return conn.execute(
         "SELECT media_id, embedding FROM product_text_embeddings"
     ).fetchall()
+
+
+def save_text_pair(conn: sqlite3.Connection,
+                   media_a: str, media_b: str, text_sim: float, now: str):
+    """제품 텍스트 유사 쌍 저장."""
+    a, b = (media_a, media_b) if media_a < media_b else (media_b, media_a)
+    conn.execute("""
+        INSERT OR REPLACE INTO text_similar_pairs (media_a, media_b, text_sim, detected_at)
+        VALUES (?, ?, ?, ?)
+    """, (a, b, text_sim, now))
+
+
+def save_visual_pair(conn: sqlite3.Connection,
+                     media_a: str, media_b: str, clip_sim: float, now: str):
+    """시각 유사 쌍 저장."""
+    a, b = (media_a, media_b) if media_a < media_b else (media_b, media_a)
+    conn.execute("""
+        INSERT OR REPLACE INTO visual_similar_pairs (media_a, media_b, clip_sim, detected_at)
+        VALUES (?, ?, ?, ?)
+    """, (a, b, clip_sim, now))
+
+
+def get_classified_pairs(conn: sqlite3.Connection,
+                         text_threshold: float = 0.75,
+                         clip_threshold: float = 0.90) -> list[sqlite3.Row]:
+    """텍스트·시각 두 신호를 조합해 match_type 라벨을 붙여 반환.
+
+    match_type:
+      reposted     — text HIGH + clip HIGH (같은 영상 도용)
+      same_product — text HIGH + clip LOW  (같은 제품, 다른 영상)
+    """
+    return conn.execute("""
+        SELECT
+            t.media_a, t.media_b,
+            t.text_sim,
+            COALESCE(v.clip_sim, 0.0) AS clip_sim,
+            CASE
+                WHEN t.text_sim >= ? AND COALESCE(v.clip_sim, 0.0) >= ? THEN 'reposted'
+                ELSE 'same_product'
+            END AS match_type,
+            t.detected_at
+        FROM text_similar_pairs t
+        LEFT JOIN visual_similar_pairs v
+            ON (t.media_a = v.media_a AND t.media_b = v.media_b)
+        WHERE t.text_sim >= ?
+        ORDER BY t.text_sim DESC
+    """, (text_threshold, clip_threshold, text_threshold)).fetchall()
 
 
 def save_similar_pair_labeled(conn: sqlite3.Connection,
