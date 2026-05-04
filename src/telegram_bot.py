@@ -26,9 +26,9 @@ CANCEL_DATA  = "bench_no"
 
 # ── Telegram API 헬퍼 ─────────────────────────────────────────────────────────
 
-def _post(method: str, **kwargs) -> dict:
+def _post(method: str, timeout: int = 10, **kwargs) -> dict:
     try:
-        r = requests.post(f"{API}/{method}", timeout=10, **kwargs)
+        r = requests.post(f"{API}/{method}", timeout=timeout, **kwargs)
         return r.json()
     except Exception as e:
         print(f"[텔레그램] {method} 오류: {e}")
@@ -80,31 +80,6 @@ def _trigger_bench():
     job = start_job()
     send_text(f"🚀 수집 시작했습니다. 약 15분 후 완료되면 파일을 보내드릴게요.\n(작업 ID: {job['id']})")
 
-    # 완료 대기 후 파일 전송 (별도 스레드)
-    import threading
-    threading.Thread(target=_wait_and_send, args=(job["id"],), daemon=True).start()
-
-
-def _wait_and_send(job_id: str):
-    sys.path.insert(0, str(ROOT))
-    from src.job_runner import refresh_jobs
-
-    for _ in range(120):  # 최대 20분 대기
-        time.sleep(10)
-        jobs = refresh_jobs()
-        job = next((j for j in jobs if j["id"] == job_id), None)
-        if not job:
-            break
-        if job["status"] == "done":
-            excel = ROOT / job["excel_path"]
-            send_file(excel, caption=f"✅ 벤치시트 완료!\n{excel.name}")
-            return
-        if job["status"] == "failed":
-            send_text("❌ 수집 중 오류가 발생했습니다. 로그를 확인해주세요.")
-            return
-
-    send_text("⏰ 20분이 지났는데 완료 여부를 확인하지 못했습니다. 웹앱을 확인해주세요.")
-
 
 # ── 폴링 루프 ─────────────────────────────────────────────────────────────────
 
@@ -126,7 +101,7 @@ def run():
             last_daily_date = today
 
         # ── 업데이트 폴링 ─────────────────────────────────────────────────────
-        resp = _post("getUpdates", json={"offset": offset, "timeout": 30, "allowed_updates": ["message", "callback_query"]})
+        resp = _post("getUpdates", timeout=25, json={"offset": offset, "timeout": 20, "allowed_updates": ["message", "callback_query"]})
         updates = resp.get("result", [])
 
         for upd in updates:

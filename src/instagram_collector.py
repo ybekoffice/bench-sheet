@@ -6,6 +6,7 @@ from pathlib import Path
 from .account_manager import apply_manual_lists
 from .apify_client import fetch_recent_posts
 from .db import get_conn, init_db, save_snapshot, upsert_post
+from .notifier import send_text
 from .seed import init_accounts_from_csv, load_active_accounts
 
 # 한 번에 Apify에 넘기는 최대 계정 수 (Actor 메모리 한계 방어)
@@ -44,6 +45,7 @@ def collect(dry_run: bool = False, limit: int | None = None):
         accounts = accounts[:limit]
 
     print(f"[수집 시작] 대상 계정: {len(accounts)}개")
+    send_text(f"🚀 수집 시작 — {len(accounts)}개 계정")
 
     if dry_run:
         print("[dry_run] Apify 호출 없이 종료. 계정 목록 상위 10:", accounts[:10])
@@ -74,6 +76,8 @@ def collect(dry_run: bool = False, limit: int | None = None):
 
             pct = round(i / len(batches) * 100)
             print(f"  배치 {i}/{len(batches)} 완료 ({pct}%)")
+            if pct in (25, 50, 75):
+                send_text(f"📦 수집 {pct}% 완료 ({i}/{len(batches)} 배치)")
 
         conn.commit()
 
