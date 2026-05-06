@@ -28,11 +28,7 @@ if __name__ == "__main__":
         print(f"[반복 수집] {args.every}시간마다 실행. 중단하려면 Ctrl+C")
         while True:
             collect(dry_run=args.dry_run, limit=args.limit)
-            if not args.dry_run:
-                evaluate()
             print(f"  다음 수집까지 {args.every}시간 대기 중...")
             time.sleep(interval_sec)
     else:
         collect(dry_run=args.dry_run, limit=args.limit)
-        if not args.dry_run:
-            evaluate()
